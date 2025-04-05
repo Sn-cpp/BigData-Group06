@@ -1,4 +1,5 @@
 /DecisTree/train.csv
 /DecisTree/test.csv
-
+/DecisTree/sample_submission.csv
 /LogisticReg/creditcard.csv
+.venv
