@@ -1,2 +1,4 @@
 /DecisTree/train.csv
+/DecisTree/test.csv
+
 /LogisticReg/creditcard.csv
