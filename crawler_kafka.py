@@ -35,15 +35,14 @@ class DataSource:
                 data = res.json()
 
                 #Add timestamp field
-                data['timestamp'] = received_time
+                data['timestamp'] = received_time.isoformat()
 
-                #print(data)
-                
                 #Publish to the topic
                 producer.produce(topic, value=json.dumps(data))
                 producer.poll(0)
 
-            break
+            #break
             time.sleep(0.1)
 
+print('Data source online')
 DataSource.start()
