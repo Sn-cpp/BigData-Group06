@@ -4,45 +4,67 @@ import json
 import time
 from confluent_kafka import Producer
 
-class DataSource:
-    def __init__(self):
+def delivery_report(err, msg):
+    if err is not None:
+        print(f"Message delivery failed: {err}")
+    else:
+        #print(f"Message delivered to {msg.topic()} [{msg.partition()}]")
         pass
 
-    @staticmethod
-    def start():
-        """Main method to start crawling"""
+class DataSource:
+    def __init__(
+        self,
+        symbol: str = "BTCUSDT",
+        kafka_servers: str = "localhost:9092",
+        topic: str = "btc-price",
+        poll_timeout: float = 0.0,
+    ):
+        self.symbol = symbol
+        self.url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
+        self.topic = topic
+        self.producer = Producer({"bootstrap.servers": kafka_servers})
+        self.poll_timeout = poll_timeout
+        self._running = False
 
-        #API link
-        url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+
+    def start(self, interval: float = 0.1) -> None:
+        self._running = True
+
+        while self._running:
+            try:
+                response = requests.get(self.url)
+                now = datetime.datetime.now(datetime.timezone.utc)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    data["timestamp"] = now.isoformat()
+                    self.producer.produce(
+                        self.topic, 
+                        value=json.dumps(data), 
+                        callback=delivery_report
+                    )
+                    print(f"Produced message: {data}")
+                    self.producer.poll(self.poll_timeout)
+                    
+            except Exception as e:
+                print(f"Error fetching data: {e}")
+
+            time.sleep(interval)
+
+    def flush(self, timeout: float = 10.0) -> None:
+        self.producer.flush(timeout)
+
+    def stop(self) -> None:
+        self._running = False
+        self.flush()
+
+if __name__ == "__main__":
+    source = DataSource()
+
+    try:
+        source.start(interval=10.0)
+    except KeyboardInterrupt:
+        print("Stopping data source...")
+        source.stop()
+        print("Data source stopped.")
         
-        #Kafka Producer and topic name
-        topic = "btc-price"
-        producer_config = {'bootstrap.servers' : 'localhost:9092'}
-
-        producer = Producer(producer_config)
-
-        #Loop for crawling and publishing
-        while True:
-            #Crawl data
-            res = requests.get(url)
-            
-            #Get timestamp
-            received_time = datetime.datetime.now(datetime.timezone.utc)
-            
-            #Only publish to topic if received a successful response
-            if res.status_code == 200:
-                #Parse the response as a JSON object
-                data = res.json()
-
-                #Add timestamp field
-                data['timestamp'] = received_time.isoformat()
-
-                #Publish to the topic
-                producer.produce(topic, value=json.dumps(data))
-                producer.poll(0)
-
-            #break
-            time.sleep(0.1)
-
-print('Data source online')
-DataSource.start()
