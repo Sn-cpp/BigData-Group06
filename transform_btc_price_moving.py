@@ -133,17 +133,17 @@ def run_moving_stream():
     )
 
     # Watermark late data for second stream
-    df = raw_df.withWatermark("window_end", "10 seconds")
+    df = raw_df.withWatermark("window_start", "10 seconds")
 
     # Group by symbol and window_end, collecting window statistics
-    grouped_df = df.filter(col('std_price').isNotNull()).groupBy("symbol", "window_end").agg(
+    grouped_df = df.filter(col('std_price').isNotNull()).groupBy("symbol", "window_start").agg(
         collect_list(struct("window", "avg_price", "std_price")).alias("windows")
     )
 
     # Convert the list of structs to a JSON string
     output_df = grouped_df.select(
         to_json(struct(
-            col("window_end").alias("timestamp"),
+            col("window_start").alias("timestamp"),
             "symbol",
             "windows"
         )).alias("value")

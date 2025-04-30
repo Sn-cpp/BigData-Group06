@@ -37,7 +37,7 @@ class DataSource:
 
                 if response.status_code == 200:
                     data = response.json()
-                    data["timestamp"] = now.isoformat()
+                    data["timestamp"] = now.isoformat(timespec="seconds")
                     self.producer.produce(
                         self.topic, 
                         value=json.dumps(data), 
