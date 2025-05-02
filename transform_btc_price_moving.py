@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, window, avg, stddev, lit, struct, collect_list, to_json
+from pyspark.sql.functions import from_json, col, window, avg, stddev, lit, struct, collect_list, to_json, to_utc_timestamp, date_format
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
 from functools import reduce
 import threading
@@ -14,6 +14,7 @@ def create_spark_session(app_name):
     spark = SparkSession.builder \
         .appName(app_name) \
         .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.4") \
+        .config("spark.sql.session.timeZone", "UTC")\
         .getOrCreate()
     
     spark.conf.set("spark.sql.streaming.statefulOperator.checkCorrectness.enabled", "false")
@@ -44,6 +45,7 @@ def run_pre_moving_stream():
         .withColumn("value", from_json("json", schema))
         .select("value.*")
         .withColumn("price", col("price").cast(DoubleType()))
+        .withColumn("timestamp", to_utc_timestamp(col("timestamp"), "UTC"))
     )
 
     # Watermark late data
@@ -88,8 +90,15 @@ def run_pre_moving_stream():
 
     # Union them all into one streaming DataFrame
     union_df = reduce(lambda dfa, dfb: dfa.unionByName(dfb), windowed_dfs)
-    output_df = union_df.select( 
-        to_json(struct("symbol", "window_start", "window_end", "window", "avg_price", "std_price")).alias("value")
+    output_df = union_df.select(
+        to_json(struct(
+            "symbol",
+            date_format(col("window_start"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("window_start"),
+            date_format(col("window_end"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("window_end"),
+            "window",
+            "avg_price",
+            "std_price"
+        )).alias("value")
     )
 
     # Write to intermediate Kafka topic
@@ -130,6 +139,8 @@ def run_moving_stream():
         .selectExpr("CAST(value AS STRING) as json")
         .withColumn("value", from_json("json", schema))
         .select("value.*")
+        .withColumn("window_start", to_utc_timestamp(col("window_start"), "UTC"))
+        .withColumn("window_end", to_utc_timestamp(col("window_end"), "UTC"))
     )
 
     # Watermark late data for second stream
@@ -143,11 +154,12 @@ def run_moving_stream():
     # Convert the list of structs to a JSON string
     output_df = grouped_df.select(
         to_json(struct(
-            col("window_start").alias("timestamp"),
+            date_format(col("window_start"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("timestamp"),
             "symbol",
             "windows"
         )).alias("value")
     )
+
 
     # Write the output to final Kafka topic
     query = output_df.writeStream \
