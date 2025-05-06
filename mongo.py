@@ -19,7 +19,7 @@ spark = SparkSession.Builder()\
 data_schema = StructType([
     StructField("timestamp", TimestampType(), False),
     StructField("symbol", StringType(), False),
-    StructField("windows", ArrayType(StructType([
+    StructField("zscores", ArrayType(StructType([
         StructField("window", StringType(), False),
         StructField("zscore_price", StringType(), False)
     ])), False),
@@ -29,7 +29,7 @@ data_schema = StructType([
 data_stream = spark.readStream.format("kafka") \
         .option("kafka.bootstrap.servers", f"{host}:{port}") \
         .option("failOnDataLoss", "false") \
-        .option("subscribe", "btc-price") \
+        .option("subscribe", "btc-price-zscore") \
         .load()
 
 df_data = data_stream\
@@ -40,35 +40,38 @@ df_data = data_stream\
 
 
 df = df_data\
-            .withColumn("wd", explode(col("windows")))\
+            .withColumn("wd", explode(col("zscores")))\
             .selectExpr(
                             "timestamp",
                             "symbol",
                             "wd.window AS window",
                             "wd.zscore_price AS zscore_price"
-                        )
+                       )
 
-windows = [
-    '30s', '1m', '5m', '15m', '30m', '1h'
-]
+writer = df.writeStream.format("console").outputMode("append").start().awaitTermination()
 
 
+# windows = [
+#     '30s', '1m', '5m', '15m', '30m', '1h'
+# ]
 
-df_by_window = [
-    df.filter(df.window==window_key) for window_key in windows
-]
 
 
-def create_writer(df, window):
-    return (df.writeStream
-    .format("mongodb")
-    .option("checkpointLocation", f"/tmp/kafka-checkpoint/{window}")
-    .option("forceDeleteTempCheckpointLocation", "true")
-    .option("spark.mongodb.database", "sparklab04")
-    .option("spark.mongodb.collection", f"btc-price-zscore-{window}")
-    .outputMode("append")
-    ).start().awaitTermination()
+# df_by_window = [
+#     df.filter(df.window==window_key) for window_key in windows
+# ]
+
+
+# def create_writer(df, window):
+#     return (df.writeStream
+#     .format("mongodb")
+#     .option("checkpointLocation", f"/tmp/kafka-checkpoint/{window}")
+#     .option("forceDeleteTempCheckpointLocation", "true")
+#     .option("spark.mongodb.database", "sparklab04")
+#     .option("spark.mongodb.collection", f"btc-price-zscore-{window}")
+#     .outputMode("append")
+#     ).start().awaitTermination()
     
 
-writers = { window_key : create_writer(df_, window_key) for window_key, df_ in zip(windows, df_by_window)}
+# writers = { window_key : create_writer(df_, window_key) for window_key, df_ in zip(windows, df_by_window)}
 

@@ -68,7 +68,7 @@ if __name__ == "__main__":
             .withColumn("data_timestamp", to_utc_timestamp(col("data_timestamp"), "UTC"))
 
     # Apply watermark to handle late data
-    df_data = df_data.withWatermark("data_timestamp", "5 minute")
+    df_data = df_data.withWatermark("data_timestamp", "5 minutes")
     df_stats = df_stats.withWatermark("stats_timestamp", "5 minutes")
 
     # Join the two streams
