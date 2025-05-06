@@ -62,7 +62,7 @@ if __name__ == "__main__":
     source = DataSource()
 
     try:
-        source.start(interval=10.0)
+        source.start()
     except KeyboardInterrupt:
         print("Stopping data source...")
         source.stop()

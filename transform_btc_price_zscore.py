@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, explode, struct, to_json, collect_list, when, to_utc_timestamp, lit, date_format
+from pyspark.sql.functions import from_json, col, explode, struct, to_json, collect_list, when, to_utc_timestamp, lit, date_format, expr
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType, ArrayType
 
 host = "localhost"
@@ -26,8 +26,8 @@ if __name__ == "__main__":
         StructField("symbol", StringType(), False),
         StructField("windows", ArrayType(StructType([
             StructField("window", StringType(), False),
-            StructField("avg_price", DoubleType(), False),
-            StructField("std_price", DoubleType(), False)
+            StructField("avg_price", StringType(), False),
+            StructField("std_price", StringType(), False)
         ])), False)
     ])
     stats_stream = spark.readStream.format("kafka") \
@@ -41,8 +41,13 @@ if __name__ == "__main__":
             .select(
                 col("value.timestamp").alias("stats_timestamp"),
                 col("value.symbol").alias("stats_symbol"),
-                "value.windows"
-            )\
+                "value.windows")\
+            .withColumn("windows", expr("""
+                transform(windows, x -> struct(
+                    x.window as window,
+                    cast(x.avg_price as double) as avg_price,
+                    cast(x.std_price as double) as std_price
+                ))"""))\
             .withColumn("stats_timestamp", to_utc_timestamp(col("stats_timestamp"), "UTC"))
 
     # Schema for data from the topic 'btc-price'
@@ -67,11 +72,11 @@ if __name__ == "__main__":
             .withColumn("price", col("price").cast(DoubleType()))\
             .withColumn("data_timestamp", to_utc_timestamp(col("data_timestamp"), "UTC"))
 
-    # Apply watermark to handle late data
+    # # Apply watermark to handle late data
     df_data = df_data.withWatermark("data_timestamp", "5 minutes")
     df_stats = df_stats.withWatermark("stats_timestamp", "5 minutes")
 
-    # Join the two streams
+    # # Join the two streams
     df_joined = df_data.join(
         df_stats,
         (df_data.data_symbol == df_stats.stats_symbol) & 
@@ -80,7 +85,7 @@ if __name__ == "__main__":
         "inner"  
     )
 
-    # Explode the 'windows' array and compute Z-score
+    # # Explode the 'windows' array and compute Z-score
     df_with_zscore = df_joined.withColumn("window_stats", explode(col("windows"))) \
         .select(
             col("data_timestamp").alias("timestamp"),
@@ -94,7 +99,7 @@ if __name__ == "__main__":
                     when(col("std_price") != 0, (col("price") - col("avg_price")) / col("std_price"))
                     .otherwise(0.0)) 
 
-    # Group by timestamp and symbol
+    # # Group by timestamp and symbol
     output_df = df_with_zscore.groupBy("timestamp", "symbol").agg(
         collect_list(struct("window", "zscore_price")).alias("zscores")
     ).select(
@@ -105,14 +110,19 @@ if __name__ == "__main__":
         )).alias("value")
     )
 
-    # Write to the topic 'btc-price-zscore'
+    #Write to the topic 'btc-price-zscore'
+    # writer = output_df.writeStream\
+    #         .format("kafka")\
+    #         .option("kafka.bootstrap.servers", f"{host}:{port}")\
+    #         .option("topic", "btc-price-zscore")\
+    #         .option("checkpointLocation", f"{checkpoint_base}/btc-price-zscore-checkpoint")\
+    #         .outputMode("append")\
+    #         .start()
     writer = output_df.writeStream\
-            .format("kafka")\
-            .option("kafka.bootstrap.servers", f"{host}:{port}")\
-            .option("topic", "btc-price-zscore")\
-            .option("checkpointLocation", f"{checkpoint_base}/btc-price-zscore-checkpoint")\
-            .outputMode("append")\
-            .start()
+                .format("console")\
+                .outputMode("append")\
+                .option("truncate", "false")\
+                .start()
 
     try:
         writer.awaitTermination()

@@ -110,6 +110,7 @@ def run_pre_moving_stream():
         .outputMode("append")
         .start())
 
+
     return writer
 
 def run_moving_stream():
@@ -162,15 +163,15 @@ def run_moving_stream():
 
 
     # Write the output to final Kafka topic
-    query = output_df.writeStream \
+    writer = output_df.writeStream \
         .format("kafka") \
         .option("kafka.bootstrap.servers", f"{host}:{port}") \
         .option("topic", "btc-price-moving") \
         .option("checkpointLocation", f"{checkpoint_base}/btc-price-moving-checkpoint") \
         .outputMode("append") \
         .start()
-        
-    return query
+    
+    return writer
 
 if __name__ == "__main__":
     print("Starting BTC price streaming pipeline with two-phase processing...")
@@ -188,6 +189,7 @@ if __name__ == "__main__":
     
     # Wait for both streams to terminate
     try:
+        pre_moving_query.awaitTermination()
         moving_query.awaitTermination()
     except KeyboardInterrupt:
         print("\nShutting down streaming pipeline...")
