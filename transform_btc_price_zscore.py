@@ -113,18 +113,13 @@ if __name__ == "__main__":
     )
 
     # Write to the topic 'btc-price-zscore'
-    # writer = output_df.writeStream\
-    #         .format("kafka")\
-    #         .option("kafka.bootstrap.servers", f"{host}:{port}")\
-    #         .option("topic", "btc-price-zscore")\
-    #         .option("checkpointLocation", f"{checkpoint_base}/btc-price-zscore-checkpoint")\
-    #         .outputMode("append")\
-    #         .start()
     writer = output_df.writeStream\
-                .format("console")\
-                .outputMode("append")\
-                .option("truncate", "false")\
-                .start()
+            .format("kafka")\
+            .option("kafka.bootstrap.servers", f"{host}:{port}")\
+            .option("topic", "btc-price-zscore")\
+            .option("checkpointLocation", f"{checkpoint_base}/btc-price-zscore-checkpoint")\
+            .outputMode("append")\
+            .start()
 
     try:
         writer.awaitTermination()
