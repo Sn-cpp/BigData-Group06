@@ -73,19 +73,18 @@ if __name__ == "__main__":
             .withColumn("data_timestamp", to_utc_timestamp(col("data_timestamp"), "UTC"))
 
     # # Apply watermark to handle late data
-    df_data = df_data.withWatermark("data_timestamp", "5 minutes")
-    df_stats = df_stats.withWatermark("stats_timestamp", "5 minutes")
+    df_data = df_data.withWatermark("data_timestamp", "10 seconds")
+    df_stats = df_stats.withWatermark("stats_timestamp", "10 seconds")
 
     # # Join the two streams
     df_joined = df_data.join(
         df_stats,
         (df_data.data_symbol == df_stats.stats_symbol) & 
-        (df_data.data_timestamp >= df_stats.stats_timestamp - lit(600).cast("interval second")) & 
-        (df_data.data_timestamp <= df_stats.stats_timestamp + lit(600).cast("interval second")),
-        "inner"  
+        (df_data.data_timestamp == df_stats.stats_timestamp),
+        "inner"
     )
-
-    # # Explode the 'windows' array and compute Z-score
+    
+    # Explode the 'windows' array and compute Z-score
     df_with_zscore = df_joined.withColumn("window_stats", explode(col("windows"))) \
         .select(
             col("data_timestamp").alias("timestamp"),
@@ -99,7 +98,10 @@ if __name__ == "__main__":
                     when(col("std_price") != 0, (col("price") - col("avg_price")) / col("std_price"))
                     .otherwise(0.0)) 
 
-    # # Group by timestamp and symbol
+    # 
+    df_with_zscore = df_with_zscore.dropDuplicates(["timestamp", "symbol", "window"])
+
+    # Group by timestamp and symbol
     output_df = df_with_zscore.groupBy("timestamp", "symbol").agg(
         collect_list(struct("window", "zscore_price")).alias("zscores")
     ).select(
@@ -110,7 +112,7 @@ if __name__ == "__main__":
         )).alias("value")
     )
 
-    #Write to the topic 'btc-price-zscore'
+    # Write to the topic 'btc-price-zscore'
     # writer = output_df.writeStream\
     #         .format("kafka")\
     #         .option("kafka.bootstrap.servers", f"{host}:{port}")\

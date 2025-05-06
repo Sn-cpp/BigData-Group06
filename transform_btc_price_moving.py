@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, window, avg, stddev, lit, struct, collect_list, to_json, to_utc_timestamp, date_format
+from pyspark.sql.functions import from_json, col, window, avg, stddev, lit, struct, collect_list, to_json, to_utc_timestamp, date_format, when
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
 from functools import reduce
 import threading
@@ -57,9 +57,8 @@ def run_pre_moving_stream():
         "1m": "1 minute",
         "5m": "5 minutes",
         "15m": "15 minutes",
-        # Uncomment if needed:
-        # "30m": "30 minutes",
-        # "1h": "1 hour"
+        "30m": "30 minutes",
+        "1h": "1 hour"
     }
 
     # Collect each windowed aggregation into a list
@@ -75,6 +74,7 @@ def run_pre_moving_stream():
                 stddev("price").alias("std_price")
             )
             # Tag which window this row came from
+            .withColumn("std_price", when(col("std_price").isNull(), lit(0.0)).otherwise(col("std_price")))
             .withColumn("window_interval", lit(name))
         )
         # Flatten the window struct for easier downstream processing
@@ -90,6 +90,7 @@ def run_pre_moving_stream():
 
     # Union them all into one streaming DataFrame
     union_df = reduce(lambda dfa, dfb: dfa.unionByName(dfb), windowed_dfs)
+    union_df = union_df.dropDuplicates(["symbol", "window_start", "window"])
     output_df = union_df.select(
         to_json(struct(
             "symbol",
