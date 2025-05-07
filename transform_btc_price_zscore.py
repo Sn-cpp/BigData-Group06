@@ -76,29 +76,47 @@ if __name__ == "__main__":
     df_data = df_data.withWatermark("data_timestamp", "10 seconds")
     df_stats = df_stats.withWatermark("stats_timestamp", "10 seconds")
 
-    # # Join the two streams
+    # Explode the windows array first to access each window's configuration
+    df_stats_exploded = df_stats.withColumn("window_item", explode(col("windows")))
+
+    # # Join the two streams with more flexible time-based join conditions
     df_joined = df_data.join(
-        df_stats,
-        (df_data.data_symbol == df_stats.stats_symbol) & 
-        (df_data.data_timestamp == df_stats.stats_timestamp),
+        df_stats_exploded,
+        (df_data.data_symbol == df_stats_exploded.stats_symbol) &
+        expr("""
+            CASE 
+                WHEN window_item.window = '30s' THEN 
+                    data_timestamp >= stats_timestamp AND data_timestamp <= stats_timestamp + interval 30 seconds
+                WHEN window_item.window = '1m' THEN 
+                    data_timestamp >= stats_timestamp AND data_timestamp <= stats_timestamp + interval 1 minute
+                WHEN window_item.window = '5m' THEN 
+                    data_timestamp >= stats_timestamp AND data_timestamp <= stats_timestamp + interval 5 minutes
+                WHEN window_item.window = '15m' THEN 
+                    data_timestamp >= stats_timestamp AND data_timestamp <= stats_timestamp + interval 15 minutes
+                WHEN window_item.window = '30m' THEN 
+                    data_timestamp >= stats_timestamp AND data_timestamp <= stats_timestamp + interval 30 minutes
+                WHEN window_item.window = '1h' THEN 
+                    data_timestamp >= stats_timestamp AND data_timestamp <= stats_timestamp + interval 1 hour
+                ELSE FALSE
+            END
+        """),
         "inner"
     )
     
-    # Explode the 'windows' array and compute Z-score
-    df_with_zscore = df_joined.withColumn("window_stats", explode(col("windows"))) \
-        .select(
+    # Compute Z-score with the already exploded window data
+    df_with_zscore = df_joined.select(
             col("data_timestamp").alias("timestamp"),
             col("data_symbol").alias("symbol"),
             col("price"),
-            col("window_stats.window"),
-            col("window_stats.avg_price"),
-            col("window_stats.std_price")
+            col("window_item.window").alias("window"),
+            col("window_item.avg_price").alias("avg_price"),
+            col("window_item.std_price").alias("std_price")
         ) \
         .withColumn("zscore_price",
                     when(col("std_price") != 0, (col("price") - col("avg_price")) / col("std_price"))
-                    .otherwise(0.0)) 
+                    .otherwise(0.0))
 
-    # 
+    # Drop duplicates based on timestamp, symbol, and window due to the threshold can be less than 1 minute
     df_with_zscore = df_with_zscore.dropDuplicates(["timestamp", "symbol", "window"])
 
     # Group by timestamp and symbol
@@ -113,14 +131,16 @@ if __name__ == "__main__":
     )
 
     # Write to the topic 'btc-price-zscore'
-    # writer = output_df.writeStream\
-    #         .format("kafka")\
-    #         .option("kafka.bootstrap.servers", f"{host}:{port}")\
-    #         .option("topic", "btc-price-zscore")\
-    #         .option("checkpointLocation", f"{checkpoint_base}/btc-price-zscore-checkpoint")\
-    #         .outputMode("append")\
-    #         .start()
     writer = output_df.writeStream\
+            .format("kafka")\
+            .option("kafka.bootstrap.servers", f"{host}:{port}")\
+            .option("topic", "btc-price-zscore")\
+            .option("checkpointLocation", f"{checkpoint_base}/btc-price-zscore-checkpoint")\
+            .outputMode("append")\
+            .start()
+    
+    # Also output to console for debugging
+    debug_writer = output_df.writeStream\
                 .format("console")\
                 .outputMode("append")\
                 .option("truncate", "false")\
