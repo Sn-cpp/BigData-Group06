@@ -1,4 +1,4 @@
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import from_json, col, window, avg, stddev, lit, struct, collect_list, to_json, collect_set,explode
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType, ArrayType
 from functools import reduce
@@ -7,71 +7,81 @@ host = "localhost"
 port = 9092
 checkpoint_base = "/tmp/kafka-checkpoint"
 
+testers = {
+    'ndtdt' : "mongodb+srv://ductindongthap:123124@sparkstream.blgujkw.mongodb.net/sparklab04?retryWrites=true&w=majority&appName=SparkStream"
+}
+
+uri = testers['ndtdt']
+
+if __name__ == "__main__":
+    #spark init
+    spark = SparkSession.Builder()\
+                .appName("kafka_2_mongodb")\
+                .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.4,org.mongodb.spark:mongo-spark-connector_2.12:10.4.1")\
+                .config("spark.sql.streaming.statefulOperator.checkCorrectness.enabled", "false")\
+                .config("spark.mongodb.write.connection.uri", uri).getOrCreate()
 
 
-spark = SparkSession.Builder()\
-            .appName("kafka_2_mongodb")\
-            .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.4,org.mongodb.spark:mongo-spark-connector_2.12:10.4.1")\
-            .config("spark.sql.streaming.statefulOperator.checkCorrectness.enabled", "false")\
-            .config("spark.mongodb.connection.uri", "mongodb+srv://ductindongthap:123124@sparkstream.blgujkw.mongodb.net/?retryWrites=true&w=majority&appName=SparkStream").getOrCreate()
+    #schema for incoming data from btc-price-zscore topic
+    data_schema = StructType([
+        StructField("timestamp", TimestampType(), False),
+        StructField("symbol", StringType(), False),
+        StructField("zscores", ArrayType(StructType([
+            StructField("window", StringType(), False),
+            StructField("zscore_price", StringType(), False)
+        ])), False),
+    ])
 
 
-data_schema = StructType([
-    StructField("timestamp", TimestampType(), False),
-    StructField("symbol", StringType(), False),
-    StructField("zscores", ArrayType(StructType([
-        StructField("window", StringType(), False),
-        StructField("zscore_price", StringType(), False)
-    ])), False),
-])
+    #Create a stream listener for btc-price-zscore topic
+    data_stream = spark.readStream.format("kafka") \
+            .option("kafka.bootstrap.servers", f"{host}:{port}") \
+            .option("failOnDataLoss", "false") \
+            .option("subscribe", "btc-price-zscore") \
+            .load()
 
 
-data_stream = spark.readStream.format("kafka") \
-        .option("kafka.bootstrap.servers", f"{host}:{port}") \
-        .option("failOnDataLoss", "false") \
-        .option("subscribe", "btc-price-zscore") \
-        .load()
+    #Cast bytes and parse the `value` to match the schema
+    df_data = data_stream\
+            .selectExpr("CAST(value AS STRING) as json")\
+            .withColumn("value", from_json("json", data_schema))\
+            .select("value.*")\
+            
 
-df_data = data_stream\
-        .selectExpr("CAST(value AS STRING) as json")\
-        .withColumn("value", from_json("json", data_schema))\
-        .select("value.*")\
+    #Flatten the array of windows
+    df = df_data\
+                .withColumn("wd", explode(col("zscores")))\
+                .selectExpr(
+                                "timestamp",
+                                "symbol",
+                                "wd.window AS window",
+                                "wd.zscore_price AS zscore_price"
+                        )
+
+
+    #Write function for batch
+    def write_mongo(df: DataFrame, epoch_id):
+        #Get windows name in the current batch
+        windows = df.select("window").distinct().collect()
         
+        #Route the writer to the correct collection using window's name
+        for row in windows:
+            window = row["window"]
+            
+            #Filter appropriate rows from batch 
+            df_by_window = df.filter(df["window"] == window)
 
+            #Write rows to corresponding collection
+            df_by_window.write\
+                .format("mongodb")\
+                .mode("append")\
+                .option("database", "sparklab04")\
+                .option("spark.mongodb.collection", f"btc-price-zscore-{window}")\
+                .save()
 
-df = df_data\
-            .withColumn("wd", explode(col("zscores")))\
-            .selectExpr(
-                            "timestamp",
-                            "symbol",
-                            "wd.window AS window",
-                            "wd.zscore_price AS zscore_price"
-                       )
-
-writer = df.writeStream.format("console").outputMode("append").start().awaitTermination()
-
-
-# windows = [
-#     '30s', '1m', '5m', '15m', '30m', '1h'
-# ]
-
-
-
-# df_by_window = [
-#     df.filter(df.window==window_key) for window_key in windows
-# ]
-
-
-# def create_writer(df, window):
-#     return (df.writeStream
-#     .format("mongodb")
-#     .option("checkpointLocation", f"/tmp/kafka-checkpoint/{window}")
-#     .option("forceDeleteTempCheckpointLocation", "true")
-#     .option("spark.mongodb.database", "sparklab04")
-#     .option("spark.mongodb.collection", f"btc-price-zscore-{window}")
-#     .outputMode("append")
-#     ).start().awaitTermination()
-    
-
-# writers = { window_key : create_writer(df_, window_key) for window_key, df_ in zip(windows, df_by_window)}
-
+    #Writer to MongoDB
+    writer = df.writeStream\
+                    .foreachBatch(write_mongo)\
+                    .outputMode("append")\
+                    .start()\
+                    .awaitTermination()

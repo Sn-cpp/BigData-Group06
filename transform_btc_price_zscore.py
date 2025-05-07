@@ -138,13 +138,6 @@ if __name__ == "__main__":
             .option("checkpointLocation", f"{checkpoint_base}/btc-price-zscore-checkpoint")\
             .outputMode("append")\
             .start()
-    
-    # Also output to console for debugging
-    debug_writer = output_df.writeStream\
-                .format("console")\
-                .outputMode("append")\
-                .option("truncate", "false")\
-                .start()
 
     try:
         writer.awaitTermination()
