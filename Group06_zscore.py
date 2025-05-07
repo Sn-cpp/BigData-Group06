@@ -139,6 +139,12 @@ if __name__ == "__main__":
             .outputMode("append")\
             .start()
 
+    # Uncomment for debugging
+    # writer = output_df.writeStream\
+    #             .format("console")\
+    #             .outputMode("append")\
+    #             .start()\
+    #             .awaitTermination()
     try:
         writer.awaitTermination()
     except KeyboardInterrupt:

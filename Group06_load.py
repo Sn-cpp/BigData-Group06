@@ -79,15 +79,16 @@ if __name__ == "__main__":
                 .option("spark.mongodb.collection", f"btc-price-zscore-{window}")\
                 .save()
 
-    #Writer to MongoDB
-    # writer = df.writeStream\
-    #                 .foreachBatch(write_mongo)\
-    #                 .outputMode("append")\
-    #                 .start()\
-    #                 .awaitTermination()
-    
+    #Write to MongoDB
     writer = df.writeStream\
-                .format("console")\
-                .outputMode("append")\
-                .start()\
-                .awaitTermination()
+                    .foreachBatch(write_mongo)\
+                    .outputMode("append")\
+                    .start()\
+                    .awaitTermination()
+
+    # Uncomment for debugging
+    # writer = df.writeStream\
+    #             .format("console")\
+    #             .outputMode("append")\
+    #             .start()\
+    #             .awaitTermination()
