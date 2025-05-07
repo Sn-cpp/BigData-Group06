@@ -80,8 +80,14 @@ if __name__ == "__main__":
                 .save()
 
     #Writer to MongoDB
+    # writer = df.writeStream\
+    #                 .foreachBatch(write_mongo)\
+    #                 .outputMode("append")\
+    #                 .start()\
+    #                 .awaitTermination()
+    
     writer = df.writeStream\
-                    .foreachBatch(write_mongo)\
-                    .outputMode("append")\
-                    .start()\
-                    .awaitTermination()
+                .format("console")\
+                .outputMode("append")\
+                .start()\
+                .awaitTermination()

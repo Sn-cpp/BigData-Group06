@@ -104,13 +104,18 @@ def run_pre_moving_stream():
 
     # Write to intermediate Kafka topic
     writer = (output_df.writeStream
-        .format("kafka")
-        .option("kafka.bootstrap.servers", f"{host}:{port}")
-        .option("topic", "btc-price-pre-moving")
-        .option("checkpointLocation", f"{checkpoint_base}/btc-price-pre-moving-checkpoint")
-        .outputMode("append")
-        .start())
+         .format("kafka")
+         .option("kafka.bootstrap.servers", f"{host}:{port}")
+         .option("topic", "btc-price-pre-moving")
+         .option("checkpointLocation", f"{checkpoint_base}/btc-price-pre-moving-checkpoint")
+         .outputMode("append")
+         .start())
 
+    #writer = output_df.writeStream\
+    #.format("console")\
+    #.outputMode("append")\
+    #.option("truncate", "false")\
+    #.start()
 
     return writer
 
@@ -146,32 +151,38 @@ def run_moving_stream():
     )
 
     # Watermark late data for second stream
-    df = raw_df.withWatermark("window_start", "10 seconds")
+    df = raw_df.withWatermark("window_end", "10 seconds")
 
     # Group by symbol and window_end, collecting window statistics
-    grouped_df = df.filter(col('std_price').isNotNull()).groupBy("symbol", "window_start").agg(
+    grouped_df = df.filter(col('std_price').isNotNull()).groupBy("symbol", "window_end").agg(
         collect_list(struct("window", "avg_price", "std_price")).alias("windows")
     )
 
     # Convert the list of structs to a JSON string
     output_df = grouped_df.select(
         to_json(struct(
-            date_format(col("window_start"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("timestamp"),
+            date_format(col("window_end"), "yyyy-MM-dd'T'HH:mm:ss'Z'").alias("timestamp"),
             "symbol",
             "windows"
         )).alias("value")
     )
 
 
-    # Write the output to final Kafka topic
+    #Write the output to final Kafka topic
     writer = output_df.writeStream \
-        .format("kafka") \
-        .option("kafka.bootstrap.servers", f"{host}:{port}") \
-        .option("topic", "btc-price-moving") \
-        .option("checkpointLocation", f"{checkpoint_base}/btc-price-moving-checkpoint") \
-        .outputMode("append") \
-        .start()
-    
+         .format("kafka") \
+         .option("kafka.bootstrap.servers", f"{host}:{port}") \
+         .option("topic", "btc-price-moving") \
+         .option("checkpointLocation", f"{checkpoint_base}/btc-price-moving-checkpoint") \
+         .outputMode("append") \
+         .start()
+
+    #writer = output_df.writeStream\
+    #   .format("console")\
+    #   .outputMode("append")\
+    #   .option("truncate", "false")\
+    #   .start()
+
     return writer
 
 if __name__ == "__main__":
