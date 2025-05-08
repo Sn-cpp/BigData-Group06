@@ -124,7 +124,7 @@ if __name__ == "__main__":
         collect_list(struct("window", "zscore_price")).alias("zscores")
     ).select(
         to_json(struct(
-            date_format(col("timestamp"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("timestamp"),
+            date_format(col("timestamp"), "yyyy-MM-dd'T'HH:mm:ss'Z'").alias("timestamp"),
             col("symbol"),
             "zscores"
         )).alias("value")

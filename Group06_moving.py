@@ -94,8 +94,8 @@ def run_pre_moving_stream():
     output_df = union_df.select(
         to_json(struct(
             "symbol",
-            date_format(col("window_start"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("window_start"),
-            date_format(col("window_end"), "yyyy-MM-dd'T'HH:mm:ss.SSSX").alias("window_end"),
+            date_format(col("window_start"), "yyyy-MM-dd'T'HH:mm:ss'Z'").alias("window_start"),
+            date_format(col("window_end"), "yyyy-MM-dd'T'HH:mm:ss'Z'").alias("window_end"),
             "window",
             "avg_price",
             "std_price"
